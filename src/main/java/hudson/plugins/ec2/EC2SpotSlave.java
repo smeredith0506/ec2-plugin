@@ -54,7 +54,14 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
 	@Override
 	public void terminate() {
 		// Cancel the spot request
-		AmazonEC2 ec2 = cloud.connect();
+        try{
+
+        Hudson.getInstance().removeNode(this);
+        } catch(IOException e){
+            LOGGER.log(Level.WARNING,"Failed to remove slave: "+name, e);
+        }
+
+        AmazonEC2 ec2 = cloud.connect();
 
 		String instanceId = getInstanceId();
 		List<String> requestIds = Collections.singletonList(spotInstanceRequestId);
@@ -75,18 +82,14 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
 				}
 
 			}
-			Hudson.getInstance().removeNode(this);
-			
+
 		} catch (AmazonServiceException e){
 			// Spot request is no longer valid
 			LOGGER.log(Level.WARNING, "Failed to terminated instance and cancel Spot request: " + spotInstanceRequestId);
 		} catch (AmazonClientException e){
 			// Spot request is no longer valid
 			LOGGER.log(Level.WARNING, "Failed to terminated instance and cancel Spot request: " + spotInstanceRequestId);
-		} catch(IOException e){
-			LOGGER.log(Level.WARNING,"Failed to remove slave: "+name, e);
-		}
-
+        }
 	}
 
 	/**

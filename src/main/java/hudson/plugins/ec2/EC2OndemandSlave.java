@@ -53,12 +53,13 @@ public final class EC2OndemandSlave extends EC2AbstractSlave {
         this(instanceId, instanceId, "debug", "/tmp/hudson", 22, 1, "debug", Mode.NORMAL, "", Collections.<NodeProperty<?>>emptyList(), null, null, null, false, null, "Fake public", "Fake private", null, null, false);
     }
 
-    
     /**
      * Terminates the instance in EC2.
      */
     public void terminate() {
         try {
+            Hudson.getInstance().removeNode(this);
+
             if (!isAlive(true)) {
                 /* The node has been killed externally, so we've nothing to do here */
                 LOGGER.info("EC2 instance already terminated: "+getInstanceId());
@@ -68,7 +69,6 @@ public final class EC2OndemandSlave extends EC2AbstractSlave {
                 ec2.terminateInstances(request);
                 LOGGER.info("Terminated EC2 instance (terminated): "+getInstanceId());
             }
-            Hudson.getInstance().removeNode(this);
         } catch (AmazonClientException e) {
             LOGGER.log(Level.WARNING,"Failed to terminate EC2 instance: "+getInstanceId(),e);
         } catch (IOException e) {

@@ -104,7 +104,6 @@ THE SOFTWARE.
             <f:textbox />
         </f:entry>
 
-
         <f:entry title="${%Tags}" description="${%EC2 Tag/Value Pairs}">
             <f:repeatable field="tags">
                 <st:include page="../EC2Tag/config.jelly" />

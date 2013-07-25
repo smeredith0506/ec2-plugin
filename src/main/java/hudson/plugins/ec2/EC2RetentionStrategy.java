@@ -53,7 +53,6 @@ public class EC2RetentionStrategy extends RetentionStrategy<EC2Computer> {
             } catch (NumberFormatException nfe) {
                 LOGGER.info("Malformed default idleTermination value: " + idleTerminationMinutes); 
             }
-
             this.idleTerminationMinutes = value;
         }
     }
@@ -65,7 +64,7 @@ public class EC2RetentionStrategy extends RetentionStrategy<EC2Computer> {
         if  (idleTerminationMinutes == 0)
         	return 1;
         
-        if (c.isIdle() && c.isOnline() && !disabled) {
+        if (c.isIdle() && !disabled) {
             // TODO: really think about the right strategy here
             final long idleMilliseconds = System.currentTimeMillis() - c.getIdleStartMilliseconds();
             if (idleMilliseconds > TimeUnit2.MINUTES.toMillis(idleTerminationMinutes)) {

@@ -131,6 +131,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public void setZone(String newZone) {
         this.zone = newZone;
     }
+
     public void setDescription(String description) {
         this.description = description;
     }
@@ -140,14 +141,15 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     }
 
     public String getZone() {
-       return zone;
+        return zone;
     }
+
     public String getDescription() {
-       return description;
+        return description;
     }
 
     public InstanceType getType() {
-       return type;
+        return type;
     }
 
     public String getBidType() {
@@ -167,7 +169,6 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public String getDisplayName() {
         return description + " (" + ami + ")";
     }
-
 
 
     public String getSecurityGroupString() {
@@ -269,65 +270,41 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         if (this.spotConfig != null && spotOrNot()) {
             return provisionSpot(listener);
         }
+        /** resets type to cc14 since if they last instance was a spot 2.8 template saves that and we only want 1.4 ondemand **/
+        this.setType(InstanceType.Cc14xlarge);
         return provisionOndemand(listener);
     }
 
-    public ArrayList<String> getAvailabilityZones(AmazonEC2 ec2) {
-        ArrayList<String> availabilityZones = new ArrayList<String>();
-
-        DescribeAvailabilityZonesResult zones = ec2.describeAvailabilityZones();
-        List<AvailabilityZone> zoneList = zones.getAvailabilityZones();
-
-        for (AvailabilityZone z : zoneList) {
-            availabilityZones.add(z.getZoneName());
-        }
-
-        return availabilityZones;
-    }
 
     public Boolean spotOrNot() {
         AmazonEC2 ec2 = getParent().connect();
-
-        String[] availabilityZones = {"us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d"};
+        // consider making the instanceTypes list definable in the front end
         List<String> instanceTypes = Arrays.asList("Cc28xlarge", "Cc14xlarge");
         Collection<String> instanceTypeCheck = new ArrayList<String>();
-        String currentBestPrice = this.getSpotMaxBidPrice();
-        String currentBestZone = "";
-        InstanceType currentBestType = null;
-        String hardOnDemandPrice = "1.20";
+        Double currentBestPrice = Double.parseDouble(this.getSpotMaxBidPrice());
+        Double hardOnDemandPrice = 1.20;
+        Boolean spot = false;
 
         DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
         for (InstanceType it : InstanceType.values()) {
-            if (instanceTypes.contains(it.name().toString())) {
+            if (instanceTypes.contains(it.name())) {
                 instanceTypeCheck.add(it.toString());
                 request.setInstanceTypes(instanceTypeCheck);
-                for (String zone : availabilityZones) {
-                    if (getAvailabilityZones(ec2).contains(zone)) {
-                        request.setAvailabilityZone(zone);
-                        DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
-
-                        if (!result.getSpotPriceHistory().isEmpty()) {
-                            SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
-                            String cp = currentPrice.getSpotPrice();
-                            if (Double.parseDouble(currentBestPrice) > Double.parseDouble(cp)) {
-                                currentBestPrice = cp;
-                                currentBestZone = zone;
-                                currentBestType = it;
-                            }
-                        }
-
+                instanceTypeCheck.remove(it.toString());
+                DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
+                if (!result.getSpotPriceHistory().isEmpty()) {
+                    SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
+                    Double cp = Double.parseDouble(currentPrice.getSpotPrice());
+                    if (currentBestPrice > cp && cp < hardOnDemandPrice) {
+                        currentBestPrice = cp;
+                        this.setType(it);
+                        spot = true;
                     }
                 }
             }
         }
-
-            if (Double.parseDouble(currentBestPrice) < Double.parseDouble(hardOnDemandPrice)) {
-                this.setZone(currentBestZone);
-                this.setType(currentBestType);
-                return true;
-            }
-        return false;
-        }
+        return spot;
+    }
 
 
     /**
@@ -390,7 +367,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
             DescribeInstancesRequest diRequest = new DescribeInstancesRequest();
             diFilters.add(new Filter("instance-state-name").withValues(InstanceStateName.Stopped.toString(),
-                    InstanceStateName.Stopping.toString()));
+            InstanceStateName.Stopping.toString()));
             diRequest.setFilters(diFilters);
             logger.println("Looking for existing instances: " + diRequest);
 
