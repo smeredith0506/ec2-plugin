@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import hudson.plugins.ec2.ssh.EC2UnixLauncher;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 import com.amazonaws.AmazonClientException;
@@ -26,19 +27,24 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
 
 	private final String spotInstanceRequestId;
 
-	public EC2SpotSlave(String name, String spotInstanceRequestId, String description, String remoteFS, int sshPort, int numExecutors, Mode mode, String initScript, String labelString, String remoteAdmin, String rootCommandPrefix, String jvmopts, String idleTerminationMinutes, List<EC2Tag> tags, String cloudName, boolean usePrivateDnsName) throws FormException, IOException {
-		this(name, spotInstanceRequestId, description, remoteFS, sshPort, numExecutors, mode, initScript, labelString, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, idleTerminationMinutes, tags, cloudName, usePrivateDnsName);
-	}
+    public EC2SpotSlave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, String cloudName, String spotInstanceRequestId) throws FormException, IOException {
+        this(description + " (" + instanceId + ")", instanceId, description, remoteFS, sshPort, numExecutors, labelString, Mode.NORMAL, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, cloudName, false, spotInstanceRequestId);
+    }
 
-	@DataBoundConstructor
-	public EC2SpotSlave(String name, String spotInstanceRequestId, String description, String remoteFS, int sshPort, int numExecutors, Mode mode, String initScript, String labelString, List<? extends NodeProperty<?>> nodeProperties, String remoteAdmin, String rootCommandPrefix, String jvmopts, String idleTerminationMinutes, List<EC2Tag> tags, String cloudName, boolean usePrivateDnsName) throws FormException, IOException {
+    public EC2SpotSlave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, String cloudName, boolean usePrivateDnsName, String spotInstanceRequestId) throws FormException, IOException {
+        this(description + " (" + instanceId + ")", instanceId, description, remoteFS, sshPort, numExecutors, labelString, Mode.NORMAL, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, cloudName, usePrivateDnsName, spotInstanceRequestId);
+    }
 
-		super(name, "", description, remoteFS, sshPort, numExecutors, mode, labelString, new EC2SpotComputerLauncher(), new EC2SpotRetentionStrategy(idleTerminationMinutes), initScript, nodeProperties, remoteAdmin, rootCommandPrefix, jvmopts, false, idleTerminationMinutes, tags, cloudName, usePrivateDnsName);
+    @DataBoundConstructor
+    public EC2SpotSlave(String name, String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, List<? extends NodeProperty<?>> nodeProperties, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, String cloudName, boolean usePrivateDnsName, String spotInstanceRequestId) throws FormException, IOException {
 
-		this.name = name;
-		this.spotInstanceRequestId = spotInstanceRequestId;
-	}
+        super(name, instanceId, description, remoteFS, sshPort, numExecutors, mode, labelString, new EC2UnixLauncher(), new EC2RetentionStrategy(idleTerminationMinutes), initScript, nodeProperties, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, tags, cloudName, usePrivateDnsName);
 
+        this.publicDNS = publicDNS;
+        this.privateDNS = privateDNS;
+        this.name = name;
+        this.spotInstanceRequestId = spotInstanceRequestId;
+    }
 
 	/**
 	 * Cancel the spot request for the instance.
