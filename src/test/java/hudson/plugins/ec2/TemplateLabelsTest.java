@@ -49,8 +49,10 @@ public class TemplateLabelsTest extends HudsonTestCase{
       List<EC2Tag> tags = new ArrayList<EC2Tag>();
       tags.add( tag1 );
       tags.add( tag2 );
+      List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+      instanceTypes.add(InstanceType.M1Large);
 
-      SlaveTemplate template = new SlaveTemplate("ami", "foo", null, "default", "zone", "22", InstanceType.M1Large, LABEL1 + " " + LABEL2, Node.Mode.NORMAL,"foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", true, "subnet 456", tags, null, false, null, "");
+      SlaveTemplate template = new SlaveTemplate("ami", "foo", null, "default", "zone", "22", InstanceType.M1Large, LABEL1 + " " + LABEL2, Node.Mode.NORMAL,"foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", true, "subnet 456", tags, null, false, null, "", instanceTypes);
       List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
       templates.add(template);
 
@@ -78,8 +80,10 @@ public class TemplateLabelsTest extends HudsonTestCase{
         List<EC2Tag> tags = new ArrayList<EC2Tag>();
         tags.add( tag1 );
         tags.add( tag2 );
+        List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+        instanceTypes.add(InstanceType.M1Large);
 
-        SlaveTemplate temp = new SlaveTemplate("ami", "foo", null, "default", "zone", "22", InstanceType.M1Large, "", Node.Mode.NORMAL, "foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", true, "subnet 456", tags, null, false, null, "");
+        SlaveTemplate temp = new SlaveTemplate("ami", "foo", null, "default", "zone", "22", InstanceType.M1Large, "", Node.Mode.NORMAL, "foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", true, "subnet 456", tags, null, false, null, "", instanceTypes);
         List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
         templates.add(temp);
 

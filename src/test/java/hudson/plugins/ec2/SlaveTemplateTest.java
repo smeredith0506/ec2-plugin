@@ -58,8 +58,10 @@ public class SlaveTemplateTest extends HudsonTestCase {
         List<EC2Tag> tags = new ArrayList<EC2Tag>();
         tags.add( tag1 );
         tags.add( tag2 );
+        List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+        instanceTypes.add(InstanceType.M1Large);
 
-	SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, false, null, "");
+	    SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, false, null, "", instanceTypes);
 
         List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
         templates.add(orig);
@@ -81,8 +83,10 @@ public class SlaveTemplateTest extends HudsonTestCase {
         List<EC2Tag> tags = new ArrayList<EC2Tag>();
         tags.add( tag1 );
         tags.add( tag2 );
+        List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+        instanceTypes.add(InstanceType.M1Large);
 
-        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, true, null, "");
+        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, true, null, "", instanceTypes);
 
         List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
         templates.add(orig);
@@ -109,10 +113,12 @@ public class SlaveTemplateTest extends HudsonTestCase {
         List<EC2Tag> tags = new ArrayList<EC2Tag>();
         tags.add( tag1 );
         tags.add( tag2 );
+        List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+        instanceTypes.add(InstanceType.M1Large);
 
         SpotConfiguration spotConfig = new SpotConfiguration(".05", SpotInstanceType.OneTime.toString());
 
-        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, spotConfig, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, "foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, true, null, "");
+        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, spotConfig, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, "foo ami", "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, true, null, "", instanceTypes);
         List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
         templates.add(orig);
 
@@ -138,8 +144,10 @@ public class SlaveTemplateTest extends HudsonTestCase {
         List<EC2Tag> tags = new ArrayList<EC2Tag>();
         tags.add( tag1 );
         tags.add( tag2 );
+        List<InstanceType> instanceTypes = new ArrayList<InstanceType>();
+        instanceTypes.add(InstanceType.M1Large);
 
-        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, false, null, "iamInstanceProfile");
+        SlaveTemplate orig = new SlaveTemplate(ami, EC2AbstractSlave.TEST_ZONE, null, "default", "foo", "22", InstanceType.M1Large, "ttt", Node.Mode.NORMAL, description, "bar", "aaa", "10", "rrr", "fff", "-Xmx1g", false, "subnet 456", tags, null, false, null, "iamInstanceProfile", instanceTypes);
 
         List<SlaveTemplate> templates = new ArrayList<SlaveTemplate>();
         templates.add(orig);

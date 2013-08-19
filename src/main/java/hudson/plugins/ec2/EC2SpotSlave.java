@@ -25,7 +25,7 @@ import hudson.slaves.NodeProperty;
 
 public final class EC2SpotSlave extends EC2AbstractSlave {
 
-	private final String spotInstanceRequestId;
+    private final String spotInstanceRequestId;
 
     public EC2SpotSlave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, String cloudName, String spotInstanceRequestId) throws FormException, IOException {
         this(description + " (" + instanceId + ")", instanceId, description, remoteFS, sshPort, numExecutors, labelString, Mode.NORMAL, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, cloudName, false, spotInstanceRequestId);
@@ -46,100 +46,81 @@ public final class EC2SpotSlave extends EC2AbstractSlave {
         this.spotInstanceRequestId = spotInstanceRequestId;
     }
 
-	/**
-	 * Cancel the spot request for the instance.
-	 * Terminate the instance if it is up.
-	 * Remove the slave from Jenkins.
-	 */
-	@Override
-	public void terminate() {
-		// Cancel the spot request
-        try{
+    /**
+     * Cancel the spot request for the instance.
+     * Terminate the instance if it is up.
+     * Remove the slave from Jenkins.
+     */
+    @Override
+    public void terminate() {
+        try {
+            Hudson.getInstance().removeNode(this);
 
-        Hudson.getInstance().removeNode(this);
-        } catch(IOException e){
-            LOGGER.log(Level.WARNING,"Failed to remove slave: "+name, e);
+            if (!isAlive(true)) {
+                /* The node has been killed externally, so we've nothing to do here */
+                LOGGER.info("EC2 instance already terminated: " + getInstanceId());
+            } else {
+                AmazonEC2 ec2 = cloud.connect();
+                TerminateInstancesRequest request = new TerminateInstancesRequest(Collections.singletonList(getInstanceId()));
+                ec2.terminateInstances(request);
+                LOGGER.info("Terminated EC2 instance (terminated): " + getInstanceId());
+            }
+        } catch (AmazonClientException e) {
+            LOGGER.log(Level.WARNING, "Failed to terminate EC2 instance: " + getInstanceId(), e);
+        } catch (IOException e) {
+            LOGGER.log(Level.WARNING, "Failed to terminate EC2 instance: " + getInstanceId(), e);
         }
+    }
 
+    /**
+     * Retrieve the SpotRequest for a requestId
+     *
+     * @param requestId
+     * @return SpotInstanceRequest object for the requestId, or null
+     */
+    private SpotInstanceRequest getSpotRequest(String spotRequestId) {
         AmazonEC2 ec2 = cloud.connect();
 
-		String instanceId = getInstanceId();
-		List<String> requestIds = Collections.singletonList(spotInstanceRequestId);
-		CancelSpotInstanceRequestsRequest cancelRequest = new CancelSpotInstanceRequestsRequest(requestIds);
-		try{
-			ec2.cancelSpotInstanceRequests(cancelRequest);
-			LOGGER.info("Canceled Spot request: "+ spotInstanceRequestId);
+        DescribeSpotInstanceRequestsRequest dsirRequest = new DescribeSpotInstanceRequestsRequest().withSpotInstanceRequestIds(spotRequestId);
+        DescribeSpotInstanceRequestsResult dsirResult = ec2.describeSpotInstanceRequests(dsirRequest);
+        List<SpotInstanceRequest> siRequests = dsirResult.getSpotInstanceRequests();
+        if (siRequests.size() <= 0) return null;
+        return siRequests.get(0);
+    }
 
-			// Terminate the slave if it is running
-			if (instanceId != null && !instanceId.equals("")){
-				if (!isAlive(true)) {
-					/* The node has been killed externally, so we've nothing to do here */
-					LOGGER.info("EC2 instance already terminated: "+instanceId);
-				} else{
-					TerminateInstancesRequest request = new TerminateInstancesRequest(Collections.singletonList(instanceId));
-					ec2.terminateInstances(request);
-					LOGGER.info("Terminated EC2 instance (terminated): "+instanceId);
-				}
+    /**
+     * Accessor for the spotInstanceRequestId
+     */
+    public String getSpotInstanceRequestId() {
+        return spotInstanceRequestId;
+    }
 
-			}
-
-		} catch (AmazonServiceException e){
-			// Spot request is no longer valid
-			LOGGER.log(Level.WARNING, "Failed to terminated instance and cancel Spot request: " + spotInstanceRequestId);
-		} catch (AmazonClientException e){
-			// Spot request is no longer valid
-			LOGGER.log(Level.WARNING, "Failed to terminated instance and cancel Spot request: " + spotInstanceRequestId);
+    @Override
+    public String getInstanceId() {
+        if (instanceId == null || instanceId.equals("")) {
+            SpotInstanceRequest sr = getSpotRequest(spotInstanceRequestId);
+            if (sr != null)
+                instanceId = sr.getInstanceId();
         }
-	}
+        return instanceId;
+    }
 
-	/**
-	 * Retrieve the SpotRequest for a requestId
-	 * @param requestId
-	 * @return SpotInstanceRequest object for the requestId, or null
-	 */
-	private SpotInstanceRequest getSpotRequest(String spotRequestId){
-		AmazonEC2 ec2 = cloud.connect();
+    @Extension
+    public static final class DescriptorImpl extends EC2AbstractSlave.DescriptorImpl {
 
-		DescribeSpotInstanceRequestsRequest dsirRequest = new DescribeSpotInstanceRequestsRequest().withSpotInstanceRequestIds(spotRequestId);
-		DescribeSpotInstanceRequestsResult dsirResult = ec2.describeSpotInstanceRequests(dsirRequest);
-		List<SpotInstanceRequest> siRequests = dsirResult.getSpotInstanceRequests();
-		if (siRequests.size() <= 0) return null;
-		return siRequests.get(0);
-	}
+        @Override
+        public String getDisplayName() {
+            return Messages.EC2SpotSlave_AmazonEC2SpotInstance();
+        }
+    }
 
-	/**
-	 * Accessor for the spotInstanceRequestId
-	 */
-	public String getSpotInstanceRequestId(){
-		return spotInstanceRequestId;
-	}
+    private static final Logger LOGGER = Logger.getLogger(EC2SpotSlave.class.getName());
 
-	@Override
-	public String getInstanceId() {
-		if (instanceId == null || instanceId.equals("")) {
-			SpotInstanceRequest sr = getSpotRequest(spotInstanceRequestId);
-			if (sr != null)
-				instanceId = sr.getInstanceId();
-		}
-		return instanceId;
-	}
-
-	@Extension
-	public static final class DescriptorImpl extends EC2AbstractSlave.DescriptorImpl {
-		
-		@Override
-		public String getDisplayName() {
-			return Messages.EC2SpotSlave_AmazonEC2SpotInstance();
-		}
-	}
-
-	private static final Logger LOGGER = Logger.getLogger(EC2SpotSlave.class.getName());
-
-	@Override
-	public String getEc2Type() {
-		String spotMaxBidPrice = this.getSpotRequest(spotInstanceRequestId).getSpotPrice();
-		return Messages.EC2SpotSlave_Spot1() + spotMaxBidPrice.substring(0, spotMaxBidPrice.length() - 3) + Messages.EC2SpotSlave_Spot2();
-	}
+    @Override
+    public String getEc2Type() {
+        String spotMaxBidPrice = this.getSpotRequest(spotInstanceRequestId).getSpotPrice();
+        return Messages.EC2SpotSlave_Spot1() + spotMaxBidPrice.substring(0, spotMaxBidPrice.length() - 3) + Messages.EC2SpotSlave_Spot2();
+    }
 
 
 }

@@ -39,6 +39,7 @@ import hudson.util.ListBoxModel;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.*;
+import java.util.logging.Logger;
 
 import javax.servlet.ServletException;
 
@@ -52,6 +53,7 @@ import com.amazonaws.AmazonServiceException;
 
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.model.*;
+import sun.beans.editors.DoubleEditor;
 
 /**
  * Template of {@link EC2AbstractSlave} to launch.
@@ -67,6 +69,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public final String remoteFS;
     public final String sshPort;
     public InstanceType type;
+    public List<InstanceType> usableTypes;
     public final String labels;
     public final Node.Mode mode;
     public final String initScript;
@@ -89,7 +92,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     private transient /*almost final*/ Set<String> securityGroupSet;
 
     @DataBoundConstructor
-    public SlaveTemplate(String ami, String zone, SpotConfiguration spotConfig, String securityGroups, String remoteFS, String sshPort, InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags, String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr, String iamInstanceProfile) {
+    public SlaveTemplate(String ami, String zone, SpotConfiguration spotConfig, String securityGroups, String remoteFS, String sshPort, InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags, String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr, String iamInstanceProfile, List<InstanceType> usableTypes) {
         this.ami = ami;
         this.zone = zone;
         this.spotConfig = spotConfig;
@@ -97,6 +100,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         this.remoteFS = remoteFS;
         this.sshPort = sshPort;
         this.type = type;
+        this.usableTypes = usableTypes;
         this.labels = Util.fixNull(labelString);
         this.mode = mode;
         this.description = description;
@@ -140,16 +144,28 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         this.type = newType;
     }
 
+    public void setUsableType(List<InstanceType> newTypes) {
+        this.usableTypes = newTypes;
+    }
+
     public String getZone() {
         return zone;
+    }
+
+    public InstanceType getType() {
+        return this.type;
     }
 
     public String getDescription() {
         return description;
     }
 
-    public InstanceType getType() {
+    public InstanceType getTypes() {
         return type;
+    }
+
+    public List<InstanceType> getUsableTypes() {
+        return this.usableTypes;
     }
 
     public String getBidType() {
@@ -250,7 +266,6 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         return iamInstanceProfile;
     }
 
-
     /**
      * Does this contain the given label?
      *
@@ -260,52 +275,50 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         return l == null || labelSet.contains(l);
     }
 
-
     /**
      * Provisions a new EC2 slave.
      *
      * @return always non-null. This needs to be then added to {@link Hudson#addNode(Node)}.
      */
     public EC2AbstractSlave provision(TaskListener listener) throws AmazonClientException, IOException {
-        if (this.spotConfig != null && spotOrNot()) {
-            return provisionSpot(listener);
+        if (this.spotConfig != null) {
+            List<InstanceType> spotInstancesInPriceRange = spotOrNot(new ArrayList<InstanceType>());
+            if (!spotInstancesInPriceRange.isEmpty())
+            for (InstanceType it : spotInstancesInPriceRange) {
+                EC2AbstractSlave node = provisionSpot(it, listener);
+                if (node != null) {
+                    LOGGER.info("provisioned " + it.toString() + " successfully");
+                    return node;
+                }
+            }
         }
         /** resets type to cc14 since if they last instance was a spot 2.8 template saves that and we only want 1.4 ondemand **/
-        this.setType(InstanceType.Cc14xlarge);
+        LOGGER.info("defaulting to on demand instance provisioning ");
         return provisionOndemand(listener);
     }
 
 
-    public Boolean spotOrNot() {
+    public List<InstanceType> spotOrNot(List<InstanceType> instanceTypesWhiteList) {
         AmazonEC2 ec2 = getParent().connect();
-        // consider making the instanceTypes list definable in the front end
-        List<String> instanceTypes = Arrays.asList("Cc28xlarge", "Cc14xlarge");
         Collection<String> instanceTypeCheck = new ArrayList<String>();
-        Double currentBestPrice = Double.parseDouble(this.getSpotMaxBidPrice());
-        Double hardOnDemandPrice = 1.20;
-        Boolean spot = false;
 
         DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
-        for (InstanceType it : InstanceType.values()) {
-            if (instanceTypes.contains(it.name())) {
-                instanceTypeCheck.add(it.toString());
-                request.setInstanceTypes(instanceTypeCheck);
-                instanceTypeCheck.remove(it.toString());
-                DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
-                if (!result.getSpotPriceHistory().isEmpty()) {
-                    SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
-                    Double cp = Double.parseDouble(currentPrice.getSpotPrice());
-                    if (currentBestPrice > cp && cp < hardOnDemandPrice) {
-                        currentBestPrice = cp;
-                        this.setType(it);
-                        spot = true;
-                    }
+        for (InstanceType it : this.getUsableTypes()) {
+            instanceTypeCheck.add(it.toString());
+            request.setInstanceTypes(instanceTypeCheck);
+            instanceTypeCheck.remove(it.toString());
+            DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
+            if (!result.getSpotPriceHistory().isEmpty()) {
+                SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
+                Double cp = Double.parseDouble(currentPrice.getSpotPrice());
+                if (Double.parseDouble(this.getSpotMaxBidPrice()) > cp) {
+                    LOGGER.info("adding " + it.toString() + " to tryable instance types");
+                    instanceTypesWhiteList.add(it);
                 }
             }
         }
-        return spot;
+        return instanceTypesWhiteList;
     }
-
 
     /**
      * Provisions new On-demand EC2 slave.
@@ -367,7 +380,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
             DescribeInstancesRequest diRequest = new DescribeInstancesRequest();
             diFilters.add(new Filter("instance-state-name").withValues(InstanceStateName.Stopped.toString(),
-            InstanceStateName.Stopping.toString()));
+                    InstanceStateName.Stopping.toString()));
             diRequest.setFilters(diFilters);
             logger.println("Looking for existing instances: " + diRequest);
 
@@ -428,14 +441,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             return newOndemandSlave(existingInstance);
 
         } catch (FormException e) {
-            throw new AssertionError(); // we should have discovered all configuration issues upfront
+            throw new AssertionError(e); // we should have discovered all configuration issues upfront
         }
     }
 
     /**
      * Provision a new slave for an EC2 spot instance to call back to Jenkins
      */
-    private EC2AbstractSlave provisionSpot(TaskListener listener) throws AmazonClientException, IOException {
+    private EC2AbstractSlave provisionSpot(InstanceType spotType, TaskListener listener) throws AmazonClientException, IOException {
         PrintStream logger = listener.getLogger();
         AmazonEC2 ec2 = getParent().connect();
 
@@ -451,14 +464,20 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 throw new AmazonClientException("Invalid Spot price specified: " + getSpotMaxBidPrice());
             }
 
-            spotRequest.setSpotPrice(getSpotMaxBidPrice());
+            //this is done to randomize the each bid slightly
+
+
+            double adjustedBid = (getParent().countCurrentEC2Slaves(null) / 100.0) + Double.parseDouble(getSpotMaxBidPrice()) + ((new Random().nextInt(100) + 1) / 1000.0);
+
+            spotRequest.setSpotPrice(String.valueOf(adjustedBid));
             spotRequest.setInstanceCount(Integer.valueOf(1));
             spotRequest.setType(getBidType());
 
             LaunchSpecification launchSpecification = new LaunchSpecification();
 
             launchSpecification.setImageId(ami);
-            launchSpecification.setInstanceType(type);
+            launchSpecification.setInstanceType(spotType);
+
 
             if (StringUtils.isNotBlank(getZone())) {
                 SpotPlacement placement = new SpotPlacement(getZone());
@@ -499,7 +518,9 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             String userDataString = Base64.encodeBase64String(newUserData.getBytes());
             launchSpecification.setUserData(userDataString);
             launchSpecification.setKeyName(keyPair.getKeyName());
-            launchSpecification.setInstanceType(type.toString());
+
+            launchSpecification.setInstanceType(spotType.toString());
+
 
             HashSet<Tag> inst_tags = null;
             if (tags != null && !tags.isEmpty()) {
@@ -512,6 +533,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             spotRequest.setLaunchSpecification(launchSpecification);
 
             // Make the request for a new Spot instance
+            //
             RequestSpotInstancesResult reqResult = ec2.requestSpotInstances(spotRequest);
 
             List<SpotInstanceRequest> reqInstances = reqResult.getSpotInstanceRequests();
@@ -558,11 +580,33 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                     List<SpotInstanceRequest> describeResponses = describeResult.getSpotInstanceRequests();
 
                     for (SpotInstanceRequest describeResponse : describeResponses) {
-
                         if (describeResponse.getState().equals("open")) {
+                            LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " is still in an open state");
+                            if (describeResponse.getStatus().getCode().equals("capacity-oversubscribed") || describeResponse.getStatus().getCode().equals("price-too-low")) {
+                                LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " ended in a status requiring cancelling,spot request will be cancelled and next biggest instance will be attempted to be provisioned");
+                                try {
+                                    ArrayList<String> spotInstanceRequestIdDelete = new ArrayList<String>();
+                                    spotInstanceRequestIdDelete.add(describeResponse.getSpotInstanceRequestId());
+                                    CancelSpotInstanceRequestsRequest cancelRequest = new CancelSpotInstanceRequestsRequest(spotInstanceRequestIdDelete);
+                                    ec2.cancelSpotInstanceRequests(cancelRequest);
+                                } catch (AmazonServiceException e) {
+                                    // Write out any exceptions that may have occurred.
+                                    System.out.println("Error cancelling instances");
+                                    System.out.println("Caught Exception: " + e.getMessage());
+                                    System.out.println("Reponse Status Code: " + e.getStatusCode());
+                                    System.out.println("Error Code: " + e.getErrorCode());
+                                    System.out.println("Request ID: " + e.getRequestId());
+                                }
+                                Thread.sleep(20 * 1000);
+                                LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " cancelled and moving to next instance type");
+                                return null;
+                            } else {
                             anyOpen = true;
+                            Thread.sleep(20 * 1000);
                             break;
+                            }
                         } else {
+                            LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " has been fullfilled and being provisioned");
                             instanceIds.add(describeResponse.getInstanceId());
                             DescribeInstancesRequest dis = new DescribeInstancesRequest();
                             dis.setInstanceIds(instanceIds);
@@ -573,9 +617,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                                 List<Instance> instancelist = res.getInstances();
                                 try {
                                     for (Instance currentInstance : instancelist) {
-                                        Instance instance = currentInstance;
-                                        EC2AbstractSlave node = newSpotSlave(instance, slaveName);
-                                        return node;
+                                        return newSpotSlave(currentInstance, slaveName);
                                     }
 
                                 } catch (Exception e) {
@@ -596,7 +638,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             } while (anyOpen);
 
         } catch (Exception e) {
-            throw new AssertionError(); // we should have discovered all configuration issues upfront
+            throw new AssertionError(e); // we should have discovered all configuration issues upfront
         }
         return null;
     }
@@ -908,5 +950,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             }
         }
     }
+    private static final Logger LOGGER = Logger.getLogger(SlaveTemplate.class.getName());
+
 }
 
