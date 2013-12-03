@@ -51,7 +51,7 @@ public class SlaveTemplateTest extends HudsonTestCase {
 
     public void testConfigRoundtrip() throws Exception {
         String ami = "ami1";
-	String description = "foo ami";
+	    String description = "foo ami";
 
         EC2Tag tag1 = new EC2Tag( "name1", "value1" );
         EC2Tag tag2 = new EC2Tag( "name2", "value2" );
@@ -76,7 +76,7 @@ public class SlaveTemplateTest extends HudsonTestCase {
 
     public void testConfigRoundtripWithPrivateDns() throws Exception {
         String ami = "ami1";
-	String description = "foo ami";
+	    String description = "foo ami";
 
         EC2Tag tag1 = new EC2Tag( "name1", "value1" );
         EC2Tag tag2 = new EC2Tag( "name2", "value2" );
