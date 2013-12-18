@@ -308,6 +308,13 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             request.setInstanceTypes(instanceTypeCheck);
             instanceTypeCheck.remove(it.toString());
             DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
+
+            try {
+                Thread.sleep(5000);
+            } catch(InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+
             if (!result.getSpotPriceHistory().isEmpty()) {
                 SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
                 Double cp = Double.parseDouble(currentPrice.getSpotPrice());
