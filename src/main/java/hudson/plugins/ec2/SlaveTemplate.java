@@ -42,6 +42,8 @@ import java.util.*;
 import java.util.logging.Logger;
 
 import javax.servlet.ServletException;
+import java.io.File;
+import java.io.FileOutputStream;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
@@ -53,7 +55,6 @@ import com.amazonaws.AmazonServiceException;
 
 import com.amazonaws.services.ec2.AmazonEC2;
 import com.amazonaws.services.ec2.model.*;
-import sun.beans.editors.DoubleEditor;
 
 /**
  * Template of {@link EC2AbstractSlave} to launch.
@@ -87,12 +88,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public final boolean usePrivateDnsName;
     protected transient EC2Cloud parent;
 
-
     private transient /*almost final*/ Set<LabelAtom> labelSet;
     private transient /*almost final*/ Set<String> securityGroupSet;
 
     @DataBoundConstructor
-    public SlaveTemplate(String ami, String zone, SpotConfiguration spotConfig, String securityGroups, String remoteFS, String sshPort, InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags, String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr, String iamInstanceProfile, List<InstanceType> usableTypes) {
+    public SlaveTemplate(String ami, String zone, SpotConfiguration spotConfig, String securityGroups, String remoteFS, String sshPort,
+                         InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors,
+                         String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags,
+                         String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr, String iamInstanceProfile, List<InstanceType> usableTypes) {
         this.ami = ami;
         this.zone = zone;
         this.spotConfig = spotConfig;
@@ -282,54 +285,127 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
      */
     public EC2AbstractSlave provision(TaskListener listener) throws AmazonClientException, IOException {
         if (this.spotConfig != null) {
-            List<InstanceType> spotInstancesInPriceRange = spotOrNot(new ArrayList<InstanceType>());
+            String requestId = String.valueOf(new Random().nextInt(10000));
+            List<SpotInstanceData> spotInstancesInPriceRange = spotOrNot(requestId);
             if (!spotInstancesInPriceRange.isEmpty())
-            for (InstanceType it : spotInstancesInPriceRange) {
-                EC2AbstractSlave node = provisionSpot(it, listener);
-                if (node != null) {
-                    LOGGER.info("provisioned " + it.toString() + " successfully");
-                    return node;
+                for (SpotInstanceData it : spotInstancesInPriceRange) {
+                    logAwsInstanceData("Request ID " + requestId + " Provisioning Instance type: " + it.getSpotData().getInstanceType() + " Availability zone " + it.getSpotData().getAvailabilityZone());
+                    EC2AbstractSlave node = provisionSpot(it, listener);
+                    if (node != null) {
+                        logAwsInstanceData("Request ID " + requestId + " Provisioned Instance type: " + it.getSpotData().getInstanceType() + " successfully");
+                        return node;
+                    }
+                    logAwsInstanceData("Request ID " + requestId + " Provisioned Instance type: " + it.getSpotData().getInstanceType() + " failed");
                 }
-            }
         }
-        /** resets type to cc14 since if they last instance was a spot 2.8 template saves that and we only want 1.4 ondemand **/
-        LOGGER.info("defaulting to on demand instance provisioning ");
+        logAwsInstanceData("defaulting to on demand instance provisioning ");
         return provisionOndemand(listener);
     }
 
+    public void logAwsInstanceData(String message) {
+        LOGGER.info(message);
 
-    public List<InstanceType> spotOrNot(List<InstanceType> instanceTypesWhiteList) {
+        File provisionLogFile = new File("~/provisioning.log");
+        byte[] messageInBytes = message.getBytes();
+
+        try {
+            if (!provisionLogFile.exists()) {
+                provisionLogFile.createNewFile();
+            }
+            FileOutputStream oFile = new FileOutputStream(provisionLogFile, false);
+            oFile.write(messageInBytes);
+            oFile.flush();
+            oFile.close();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public class SpotInstanceData implements Comparable<SpotInstanceData> {
+        private double price;
+        private SpotPrice spotData;
+
+        public SpotInstanceData(SpotPrice spotData, double price) {
+            this.price = price;
+            this.spotData = spotData;
+        }
+
+        public double getPrice() {
+            return price;
+        }
+
+        public SpotPrice getSpotData() {
+            return spotData;
+        }
+
+        public void setPrice(double price) {
+            this.price = price;
+        }
+
+        public void setSpotData(SpotPrice instanceType) {
+            this.spotData = instanceType;
+        }
+
+        public InstanceType getSpotDataInstanceType() {
+            return InstanceType.fromValue(this.spotData.getInstanceType());
+        }
+
+        public int compareTo(SpotInstanceData spotInstanceData) {
+            if (this.price > spotInstanceData.getPrice()) return 1;
+            if (this.price < spotInstanceData.getPrice()) return -1;
+            return 0;
+        }
+    }
+
+    public ArrayList<SpotInstanceData> spotOrNot(String requestId) {
+        logAwsInstanceData("Request ID " + requestId + " Provisioning request " + " started");
+
         AmazonEC2 ec2 = getParent().connect();
         Collection<String> instanceTypeCheck = new ArrayList<String>();
+        ArrayList<SpotInstanceData> spotInstanceCollection = new ArrayList<SpotInstanceData>();
+
 
         DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
         for (InstanceType it : this.getUsableTypes()) {
             instanceTypeCheck.add(it.toString());
-            request.setInstanceTypes(instanceTypeCheck);
-            instanceTypeCheck.remove(it.toString());
-            DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
+        }
 
-            try {
-                Thread.sleep(5000);
-            } catch(InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
+        request.setInstanceTypes(instanceTypeCheck);
+        request.setProductDescriptions(Arrays.asList("Linux/UNIX"));
+        request.setStartTime(new Date());
+        DescribeSpotPriceHistoryResult result = ec2.describeSpotPriceHistory(request);
 
+        //logAwsInstanceData(result.toString());
+
+        for (SpotPrice spotInstanceType : result.getSpotPriceHistory()) {
             if (!result.getSpotPriceHistory().isEmpty()) {
-                SpotPrice currentPrice = result.getSpotPriceHistory().get(0);
-                Double cp = Double.parseDouble(currentPrice.getSpotPrice());
+                InstanceType it = InstanceType.fromValue(spotInstanceType.getInstanceType());
+                Double cp = Double.parseDouble(spotInstanceType.getSpotPrice());
+                //logAwsInstanceData("Request ID " + requestId + " Instance type: " + it.toString() + " current price " + String.valueOf(cp));
+
                 if (Double.parseDouble(this.getSpotMaxBidPrice()) > cp) {
-                    LOGGER.info("adding " + it.toString() + " to tryable instance types");
-                    instanceTypesWhiteList.add(it);
+                    logAwsInstanceData("Request ID " + requestId + " Adding Instance type: " + it.toString() + " Availability zone " + spotInstanceType.getAvailabilityZone() + " current price " + String.valueOf(cp));
+                    spotInstanceCollection.add(new SpotInstanceData(spotInstanceType, cp));
+                } else {
+                    //logAwsInstanceData("Request ID " + requestId + " Removing Instance type: " + it.toString() + " current price " + String.valueOf(cp));
                 }
             }
         }
-        return instanceTypesWhiteList;
+
+        Collections.sort(spotInstanceCollection);
+
+        for (SpotInstanceData it : spotInstanceCollection) {
+            logAwsInstanceData("Request ID " + requestId + " Instance type: " + it.getSpotDataInstanceType() + " Availability zone " + it.getSpotData().getAvailabilityZone() + " price: " + it.price);
+        }
+
+        return spotInstanceCollection;
     }
 
     /**
      * Provisions new On-demand EC2 slave.
      */
+
     private EC2AbstractSlave provisionOndemand(TaskListener listener) throws AmazonClientException, IOException {
         PrintStream logger = listener.getLogger();
         AmazonEC2 ec2 = getParent().connect();
@@ -455,7 +531,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     /**
      * Provision a new slave for an EC2 spot instance to call back to Jenkins
      */
-    private EC2AbstractSlave provisionSpot(InstanceType spotType, TaskListener listener) throws AmazonClientException, IOException {
+    private EC2AbstractSlave provisionSpot(SpotInstanceData spotType, TaskListener listener) throws AmazonClientException, IOException {
         PrintStream logger = listener.getLogger();
         AmazonEC2 ec2 = getParent().connect();
 
@@ -473,17 +549,17 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
             //this is done to randomize the each bid slightly
 
-
             double adjustedBid = (getParent().countCurrentEC2Slaves(null) / 100.0) + Double.parseDouble(getSpotMaxBidPrice()) + ((new Random().nextInt(100) + 1) / 1000.0);
 
             spotRequest.setSpotPrice(String.valueOf(adjustedBid));
             spotRequest.setInstanceCount(Integer.valueOf(1));
             spotRequest.setType(getBidType());
+            spotRequest.setAvailabilityZoneGroup(spotType.getSpotData().getAvailabilityZone());
 
             LaunchSpecification launchSpecification = new LaunchSpecification();
 
             launchSpecification.setImageId(ami);
-            launchSpecification.setInstanceType(spotType);
+            launchSpecification.setInstanceType(spotType.getSpotDataInstanceType());
 
 
             if (StringUtils.isNotBlank(getZone())) {
@@ -526,16 +602,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             launchSpecification.setUserData(userDataString);
             launchSpecification.setKeyName(keyPair.getKeyName());
 
-            launchSpecification.setInstanceType(spotType.toString());
+            launchSpecification.setInstanceType(spotType.getSpotData().getInstanceType());
 
 
             HashSet<Tag> inst_tags = null;
-            if (tags != null && !tags.isEmpty()) {
-                inst_tags = new HashSet<Tag>();
+            inst_tags = new HashSet<Tag>();
                 for (EC2Tag t : tags) {
                     inst_tags.add(new Tag(t.getName(), t.getValue()));
                 }
-            }
 
             spotRequest.setLaunchSpecification(launchSpecification);
 
@@ -590,7 +664,10 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                         if (describeResponse.getState().equals("open")) {
                             LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " is still in an open state");
                             if (describeResponse.getStatus().getCode().equals("capacity-oversubscribed") || describeResponse.getStatus().getCode().equals("price-too-low")) {
-                                LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " ended in a status requiring cancelling,spot request will be cancelled and next biggest instance will be attempted to be provisioned");
+
+                                LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() +
+                                        " ended in a status requiring cancelling,spot request will be cancelled and next cheapest instance will be attempted to be provisioned "
+                                        + describeResponse.getStatus().getCode());
                                 try {
                                     ArrayList<String> spotInstanceRequestIdDelete = new ArrayList<String>();
                                     spotInstanceRequestIdDelete.add(describeResponse.getSpotInstanceRequestId());
@@ -608,22 +685,22 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                                 LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " cancelled and moving to next instance type");
                                 return null;
                             } else {
-                            anyOpen = true;
-                            Thread.sleep(20 * 1000);
-                            break;
+                                anyOpen = true;
+                                Thread.sleep(20 * 1000);
+                                break;
                             }
                         } else {
                             LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " has been fullfilled and being provisioned");
                             instanceIds.add(describeResponse.getInstanceId());
                             DescribeInstancesRequest dis = new DescribeInstancesRequest();
                             dis.setInstanceIds(instanceIds);
-                            DescribeInstancesResult disresult = ec2.describeInstances(dis);
-                            List<Reservation> list = disresult.getReservations();
+                            DescribeInstancesResult disResult = ec2.describeInstances(dis);
+                            List<Reservation> list = disResult.getReservations();
 
                             for (Reservation res : list) {
-                                List<Instance> instancelist = res.getInstances();
+                                List<Instance> instanceList = res.getInstances();
                                 try {
-                                    for (Instance currentInstance : instancelist) {
+                                    for (Instance currentInstance : instanceList) {
                                         return newSpotSlave(currentInstance, slaveName);
                                     }
 
@@ -652,11 +729,15 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
 
     private EC2OndemandSlave newOndemandSlave(Instance inst) throws FormException, IOException {
-        return new EC2OndemandSlave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels, mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(), inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), parent.name, usePrivateDnsName);
+        return new EC2OndemandSlave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels,
+                mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(),
+                inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), parent.name, usePrivateDnsName);
     }
 
     private EC2SpotSlave newSpotSlave(Instance inst, String name) throws FormException, IOException {
-        return new EC2SpotSlave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels, mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(), inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), parent.name, usePrivateDnsName, inst.getSpotInstanceRequestId()
+        return new EC2SpotSlave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels,
+                mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(),
+                inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), parent.name, usePrivateDnsName, inst.getSpotInstanceRequestId()
         );
     }
 
@@ -957,6 +1038,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             }
         }
     }
+
     private static final Logger LOGGER = Logger.getLogger(SlaveTemplate.class.getName());
 
 }
