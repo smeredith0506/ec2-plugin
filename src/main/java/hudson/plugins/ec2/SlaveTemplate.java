@@ -606,10 +606,12 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
 
             HashSet<Tag> inst_tags = null;
-            inst_tags = new HashSet<Tag>();
+            if (tags != null && !tags.isEmpty()) {
+                inst_tags = new HashSet<Tag>();
                 for (EC2Tag t : tags) {
                     inst_tags.add(new Tag(t.getName(), t.getValue()));
                 }
+            }
 
             spotRequest.setLaunchSpecification(launchSpecification);
 
