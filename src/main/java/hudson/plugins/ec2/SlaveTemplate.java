@@ -278,6 +278,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         return l == null || labelSet.contains(l);
     }
 
+    public void sleepRange(Integer time, String requestId) {
+        logAwsInstanceData("Request ID: " + requestId + " is waiting up to " + time + " seconds before trying to provision an instance");
+        try {
+            Thread.sleep(new Random().nextInt(time) * 1000);
+        } catch (Exception e) {
+        }
+    }
+
     /**
      * Provisions a new EC2 slave.
      *
@@ -286,17 +294,25 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public EC2AbstractSlave provision(TaskListener listener) throws AmazonClientException, IOException {
         if (this.spotConfig != null) {
             String requestId = String.valueOf(new Random().nextInt(10000));
-            List<SpotInstanceData> spotInstancesInPriceRange = spotOrNot(requestId);
-            if (!spotInstancesInPriceRange.isEmpty())
+
+            List<SpotInstanceData> spotInstancesInPriceRange = new ArrayList<SpotInstanceData>(spotOrNot(requestId));
+            //List<SpotInstanceData> subSpotInstancesInPriceRange = new ArrayList<SpotInstanceData>(spotInstancesInPriceRange.subList(0, spotInstancesInPriceRange.size() - 1));
+
+            Collections.shuffle(spotInstancesInPriceRange,new Random(System.nanoTime()));
+
+            if (!spotInstancesInPriceRange.isEmpty()) {
                 for (SpotInstanceData it : spotInstancesInPriceRange) {
+                    sleepRange(30,requestId);
                     logAwsInstanceData("Request ID " + requestId + " Provisioning Instance type: " + it.getSpotData().getInstanceType() + " Availability zone " + it.getSpotData().getAvailabilityZone());
                     EC2AbstractSlave node = provisionSpot(it, listener);
                     if (node != null) {
                         logAwsInstanceData("Request ID " + requestId + " Provisioned Instance type: " + it.getSpotData().getInstanceType() + " successfully");
                         return node;
                     }
+
                     logAwsInstanceData("Request ID " + requestId + " Provisioned Instance type: " + it.getSpotData().getInstanceType() + " failed");
                 }
+            }
         }
         logAwsInstanceData("defaulting to on demand instance provisioning ");
         return provisionOndemand(listener);
@@ -366,11 +382,16 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         ArrayList<SpotInstanceData> spotInstanceCollection = new ArrayList<SpotInstanceData>();
 
 
-        DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
         for (InstanceType it : this.getUsableTypes()) {
             instanceTypeCheck.add(it.toString());
         }
 
+        try {
+            Thread.sleep(new Random().nextInt(20) * 1000);
+        } catch (Exception e) {
+        }
+
+        DescribeSpotPriceHistoryRequest request = new DescribeSpotPriceHistoryRequest();
         request.setInstanceTypes(instanceTypeCheck);
         request.setProductDescriptions(Arrays.asList("Linux/UNIX"));
         request.setStartTime(new Date());
@@ -665,11 +686,10 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                     for (SpotInstanceRequest describeResponse : describeResponses) {
                         if (describeResponse.getState().equals("open")) {
                             LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " is still in an open state");
-                            if (describeResponse.getStatus().getCode().equals("capacity-oversubscribed") || describeResponse.getStatus().getCode().equals("price-too-low")) {
+                            if (describeResponse.getStatus().getCode().equals("capacity-oversubscribed") || describeResponse.getStatus().getCode().equals("price-too-low") || describeResponse.getStatus().getCode().equals("az-group-constraint")) {
 
                                 LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() +
-                                        " ended in a status requiring cancelling,spot request will be cancelled and next cheapest instance will be attempted to be provisioned "
-                                        + describeResponse.getStatus().getCode());
+                                        " ended with status " + describeResponse.getStatus().getCode() + " requires cancelling");
                                 try {
                                     ArrayList<String> spotInstanceRequestIdDelete = new ArrayList<String>();
                                     spotInstanceRequestIdDelete.add(describeResponse.getSpotInstanceRequestId());
@@ -683,7 +703,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                                     System.out.println("Error Code: " + e.getErrorCode());
                                     System.out.println("Request ID: " + e.getRequestId());
                                 }
-                                Thread.sleep(20 * 1000);
+                                Thread.sleep(60 * 1000);
                                 LOGGER.info("Spot request: " + describeResponse.getSpotInstanceRequestId() + " cancelled and moving to next instance type");
                                 return null;
                             } else {
